@@ -41,7 +41,7 @@ def print_banner():
     Usage:
       -f, --file      File containing the list of IP addresses (default: iplist.txt)
       -t, --timeout   FTP connection timeout in seconds (default: 5)
-      -r, --retries   Number of retries for failed connections (default: 3)
+      -r, --retries   Number of retries for failed connections (default: 1)
       --log-level     Set the logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL; default: INFO)
       --check-only    Only check connectivity, do not attempt anonymous logins (default: False)
 
@@ -54,7 +54,7 @@ def parse_arguments():
     parser = argparse.ArgumentParser(description='Check for anonymous FTP logins.')
     parser.add_argument('-f', '--file', default='iplist.txt', help='File containing list of IP addresses')
     parser.add_argument('-t', '--timeout', type=int, default=5, help='FTP connection timeout in seconds')
-    parser.add_argument('-r', '--retries', type=int, default=3, help='Number of retries for failed connections')
+    parser.add_argument('-r', '--retries', type=int, default=1, help='Number of retries for failed connections')  # Default set to 1
     parser.add_argument('--log-level', default='INFO', help='Set the logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)')
     parser.add_argument('--check-only', action='store_true', help='Only check connectivity, do not attempt anonymous logins')
     args = parser.parse_args()
@@ -69,49 +69,76 @@ def parse_arguments():
 def load_config(config_file):
     try:
         with open(config_file, 'r') as file:
-            return json.load(file)
+            config = json.load(file)
+            return {
+                'file': config.get('file', 'iplist.txt'),
+                'timeout': config.get('timeout', 5),
+                'retries': config.get('retries', 1)  # Default set to 1
+            }
     except FileNotFoundError:
         print(Fore.RED + "Configuration file not found." + Style.RESET_ALL)
-        return {}
+        return {
+            'file': 'iplist.txt',
+            'timeout': 5,
+            'retries': 1  # Default set to 1
+        }
 
 def print_progress_bar(current, total):
     bar_length = 40
     progress = int((current / total) * bar_length)
     bar = f"[{'#' * progress}{'.' * (bar_length - progress)}]"
-    print(f'\rProgress: {bar} {current}/{total}', end='')
+    print(f'\r{bar} {current}/{total}', end='')
 
 def check_connectivity(hostname, port=21, timeout=5):
     try:
         with socket.create_connection((hostname, port), timeout=timeout):
+            print(Fore.GREEN + f'[+] {hostname} is reachable.' + Style.RESET_ALL)
             return True
-    except (socket.timeout, ConnectionRefusedError):
+    except (socket.timeout, ConnectionRefusedError) as e:
+        print(Fore.RED + f'[-] {hostname} is not reachable: {e}' + Style.RESET_ALL)
         return False
 
 def anonLogin(hostname, timeout, retries):
-    for attempt in range(retries):
+    attempt = 0
+    while attempt < retries:
         try:
             ftp = ftplib.FTP(hostname, timeout=timeout)
             ftp.login('anonymous', 'ilove@you.com')
-            print(Fore.GREEN + '\n[*] ' + str(hostname) + ' FTP Anonymous Logon Succeeded.' + Style.RESET_ALL)
-            logging.info(f'{hostname} FTP Anonymous Logon Succeeded.')
+            
+            # Capture and print the server response after login attempt
+            response = ftp.getresp()
+            print(Fore.GREEN + f'\n[*] {hostname} FTP Anonymous Logon Succeeded. Server response: {response}' + Style.RESET_ALL)
+            logging.info(f'{hostname} FTP Anonymous Logon Succeeded. Server response: {response}')
+            
             ftp.quit()
             return True
-        except Exception as e:
-            if attempt < retries - 1:
+        except ftplib.all_errors as e:
+            attempt += 1
+            if attempt < retries:
+                print(Fore.YELLOW + f'[!] Attempt {attempt}/{retries} failed for {hostname}. Retrying...' + Style.RESET_ALL)
                 time.sleep(2)  # Wait before retrying
             else:
-                print(Fore.RED + '\n[-] ' + str(hostname) + ' FTP Anonymous Logon Failed.' + Style.RESET_ALL)
-                logging.info(f'{hostname} FTP Anonymous Logon Failed. Reason: {e}')
+                # Capture and print server response if available
+                if hasattr(e, 'args') and len(e.args) > 1:
+                    response = e.args[1]
+                else:
+                    response = str(e)
+                print(Fore.RED + f'\n[-] {hostname} FTP Anonymous Logon Failed: {response}' + Style.RESET_ALL)
+                logging.info(f'{hostname} FTP Anonymous Logon Failed. Reason: {response}')
     return False
 
-def process_host(host, timeout, retries, check_only):
+def process_host(host, timeout, retries, check_only, results):
     host = strip_url_prefix(host)
     if check_connectivity(host):
+        results['reachable'].append(host)
         if not check_only:
-            anonLogin(host, timeout, retries)
+            if anonLogin(host, timeout, retries):
+                results['anon_login'].append(host)
+            else:
+                results['anon_failures'].append(host)
     else:
-        print(Fore.RED + f'[-] {host} is not reachable or does not accept connections.' + Style.RESET_ALL)
-        logging.info(f'{host} is not reachable or does not accept connections.')
+        results['unreachable'].append(host)
+    print()  # Ensure each result is printed on a new line
 
 def strip_url_prefix(url):
     parsed_url = urlparse(url)
@@ -135,60 +162,65 @@ def load_hosts(file_path):
                 print("   192.168.1.2, 192.168.1.3")
                 print("3. Save the file and re-run the script.")
                 return []
-            
-            # Handle IPs with URL prefixes and various delimiters
-            hosts = [strip_url_prefix(ip.strip()) for ip in content.replace('\n', ',').split(',') if ip.strip()]
-            if not hosts:
-                print(Fore.RED + "Error: IP list is empty." + Style.RESET_ALL)
-                print("Instructions for Adding IP Addresses:")
-                print("1. Open the file specified with -f or --file.")
-                print("2. Add each IP address on a new line or separate them with commas.")
-                print("   Example:")
-                print("   192.168.1.1")
-                print("   192.168.1.2, 192.168.1.3")
-                print("3. Save the file and re-run the script.")
-            return hosts
+            else:
+                hosts = [host.strip() for host in content.replace(',', '\n').splitlines()]
+                # Handle URLs with prefixes
+                return [strip_url_prefix(host) for host in hosts]
     except FileNotFoundError:
-        print(Fore.RED + "Error: File not found." + Style.RESET_ALL)
-        print("Instructions for Adding IP Addresses:")
-        print("1. Create a file named 'iplist.txt' or specify a different file with -f or --file.")
-        print("2. Add each IP address on a new line or separate them with commas.")
-        print("   Example:")
-        print("   192.168.1.1")
-        print("   192.168.1.2, 192.168.1.3")
-        print("3. Save the file and re-run the script.")
+        print(Fore.RED + f"Error: File {file_path} not found." + Style.RESET_ALL)
         return []
+
+def save_summary(results):
+    with open('summary.txt', 'w') as file:
+        file.write("Summary of FTP Anonymous Login Scan\n")
+        file.write("="*40 + "\n\n")
+
+        file.write(Fore.GREEN + "Reachable IPs:\n" + Style.RESET_ALL)
+        for ip in results['reachable']:
+            file.write(f'[+] {ip}\n')
+        
+        file.write(Fore.RED + "\nUnreachable IPs:\n" + Style.RESET_ALL)
+        for ip in results['unreachable']:
+            file.write(f'[-] {ip}\n')
+        
+        file.write(Fore.GREEN + "\nIPs with Successful Anonymous Logins:\n" + Style.RESET_ALL)
+        for ip in results['anon_login']:
+            file.write(f'[+] {ip}\n')
+        
+        file.write(Fore.RED + "\nIPs with Failed Anonymous Logins:\n" + Style.RESET_ALL)
+        for ip in results['anon_failures']:
+            file.write(f'[-] {ip}\n')
+
+    print(Fore.GREEN + "Summary saved to 'summary.txt'" + Style.RESET_ALL)
 
 def main():
     args = parse_arguments()
-    setup_logging(getattr(logging, args.log_level.upper(), logging.INFO))
-    
+    setup_logging(args.log_level.upper())
     print_banner()
-    
-    config = load_config('config.json')
-    file_path = config.get('file', args.file)
-    timeout = config.get('timeout', args.timeout)
-    retries = config.get('retries', args.retries)
-    check_only = args.check_only
 
-    if not confirm_action('Do you want to proceed with the scan? (y/n): '):
-        print("Scan aborted.")
+    if not confirm_action("Do you want to proceed with the scan? (y/n): "):
+        print("Exiting...")
         return
 
-    Hosts = load_hosts(file_path)
-    if not Hosts:
+    hosts = load_hosts(args.file)
+    if not hosts:
         return
 
-    total_hosts = len(Hosts)
+    results = {
+        'reachable': [],
+        'unreachable': [],
+        'anon_login': [],
+        'anon_failures': []
+    }
+
     print("Processing IPs...")
-
-    with ThreadPoolExecutor(max_workers=10) as executor:
-        futures = [executor.submit(process_host, host, timeout, retries, check_only) for host in Hosts]
-        for index, future in enumerate(tqdm(futures, desc="Progress", unit="host", ncols=100)):
-            future.result()  # Ensure any exceptions are raised
+    with ThreadPoolExecutor() as executor:
+        futures = [executor.submit(process_host, host, args.timeout, args.retries, args.check_only, results) for host in hosts]
+        for _ in tqdm(as_completed(futures), total=len(futures), desc="Progress"):
+            pass
 
     print(Fore.GREEN + "\nProcessing complete." + Style.RESET_ALL)
-    logging.info('Script completed.')
+    save_summary(results)
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
