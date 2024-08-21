@@ -46,7 +46,7 @@ def print_banner():
       --check-only    Only check connectivity, do not attempt anonymous logins (default: False)
 
     Example:
-      python script.py -f iplist.txt -t 10 -r 5 --log-level DEBUG --check-only
+      python ftpanon.py -f iplist.txt -t 10 -r 5 --log-level DEBUG --check-only
 
     {reset}""")
 
