@@ -24,5 +24,5 @@ The FTP Anonymous Login Checker is a Python script that verifies anonymous FTP l
 1. Clone the repository:
 
    ```sh
-   git clone https://github.com/yourusername/ftp-anonymous-login-checker.git
-   cd ftp-anonymous-login-checker
+   git clone https://github.com/lokii-git/ftpanon.git
+   cd ftpanon
