@@ -1,0 +1,5 @@
+{
+  "file": "iplist.txt",
+  "timeout": 10,
+  "retries": 5
+}
