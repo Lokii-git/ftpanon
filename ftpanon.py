@@ -21,14 +21,14 @@ def setup_logging(log_level):
 def print_banner():
     orange = '\033[33m'  # ANSI escape code for orange
     reset = '\033[0m'    # ANSI escape code to reset color
+    version = 'v1.2.0'
+    creator = '@lokii-git'
     print(f"""{orange}
     ________________     ___    _   ______  _   __
    / ____/_  __/ __ \   /   |  / | / / __ \/ | / /
   / /_    / / / /_/ /  / /| | /  |/ / / / /  |/ / 
- / __/   / / / ____/  / ___ |/ /|  / /_/ / /|  /  
-/_/     /_/ /_/      /_/  |_/_/ |_/\____/_/ |_/   
-                                              
-           Created by Lokii
+ / __/   / / / ____/  / ___ |/ /|  / /_/ / /|  /  {creator}
+/_/     /_/ /_/      /_/  |_/_/ |_/\____/_/ |_/   {version}
 
     Description:
     This script checks for anonymous FTP login capabilities on a list of IP addresses.
